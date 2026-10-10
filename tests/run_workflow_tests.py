@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -154,8 +155,16 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+def n8n_bin() -> str:
+    # On Windows npm installs n8n as n8n.cmd, which subprocess can't find by bare name.
+    path = shutil.which("n8n")
+    if not path:
+        raise SystemExit("n8n not found on PATH. Install it with: npm install -g n8n")
+    return path
+
+
 def run_n8n(args: list[str], env: dict) -> str:
-    proc = subprocess.run(["n8n", *args], env=env, capture_output=True, text=True, timeout=240)
+    proc = subprocess.run([n8n_bin(), *args], env=env, capture_output=True, text=True, timeout=240)
     if proc.returncode != 0:
         raise RuntimeError(f"n8n {' '.join(args)} failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}")
     return proc.stdout
@@ -191,13 +200,16 @@ def wait_ready(base: str, proc: subprocess.Popen) -> None:
 # --------------------------------------------------------------------------- main
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # arrows in output on Windows consoles
     mock = HTTPServer(("127.0.0.1", 0), Mock)
     threading.Thread(target=mock.serve_forever, daemon=True).start()
     mock_url = f"http://127.0.0.1:{mock.server_port}"
     port = free_port()
     responses: dict[str, tuple[int, dict]] = {}
 
-    with tempfile.TemporaryDirectory() as home:
+    # ignore_cleanup_errors: on Windows n8n can hold its sqlite file for a moment after exit
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as home:
         env = {**os.environ, "N8N_USER_FOLDER": home, "N8N_DIAGNOSTICS_ENABLED": "false",
                "N8N_RUNNERS_ENABLED": "true", "N8N_LOG_LEVEL": "error", "N8N_LISTEN_ADDRESS": "127.0.0.1",
                "N8N_ENCRYPTION_KEY": "test-encryption-key-not-secret",
@@ -213,7 +225,7 @@ def main() -> int:
         run_n8n(["publish:workflow", "--id=leadQualifierTest"], env)
 
         print("starting n8n…")
-        proc = subprocess.Popen(["n8n", "start"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen([n8n_bin(), "start"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             base = f"http://127.0.0.1:{port}"
             wait_ready(base, proc)

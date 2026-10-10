@@ -2,7 +2,11 @@ name: workflow e2e
 on: [push, pull_request]
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -13,6 +17,7 @@ jobs:
           python-version: "3.12"
       - run: npm install -g n8n@2.35.7
       - name: Workflow JSON is up to date with build_workflow.py
+        if: runner.os == 'Linux'
         run: |
           python scripts/build_workflow.py
           git diff --exit-code workflows/
